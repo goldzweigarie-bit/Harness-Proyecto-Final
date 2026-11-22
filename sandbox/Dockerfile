@@ -1,5 +1,5 @@
 # Sandbox image the agent's commands run in.
-# Milestone 2 hardens it further at run time (--network none, CPU/memory limits).
+# Limits (no network, CPU, memory, pids, read-only root) are applied at run time; see harness/sandbox.py.
 FROM python:3.12-slim
 
 RUN apt-get update \

@@ -78,3 +78,16 @@ def test_check_fails_when_agent_does_nothing(tmp_path):
     with LocalSandbox() as sb:
         traj = run_task(task, ScriptedModel(["```bash\nsubmit\n```"]), sb, runs_dir=tmp_path)
     assert not traj["check"]["passed"]
+
+
+class DyingSandbox(LocalSandbox):
+    def execute(self, command, timeout=60):
+        raise RuntimeError("docker daemon went away")
+
+
+def test_sandbox_crash_still_saves_trajectory(tmp_path):
+    task = load_task(ROOT / "tasks" / "001-fizzbuzz")
+    with DyingSandbox() as sb:
+        traj = run_task(task, ScriptedModel(["```bash\nls\n```"]), sb, runs_dir=tmp_path)
+    assert traj["exit_status"] == "error" and "daemon went away" in traj["error"]
+    assert not traj["check"]["passed"] and Path(traj["path"]).exists()

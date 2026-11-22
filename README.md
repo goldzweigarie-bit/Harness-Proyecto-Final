@@ -5,13 +5,20 @@ scratch in Python (standard library only): an LLM loop, a Docker sandbox, and �
 in later milestones — native tool calling, sessions, context compaction,
 concurrent tool calls / parallel subagents, and an automatic benchmark.
 
+**Specialization: enterprise data and operations** — validated SQL access,
+access-controlled document retrieval, log triage, and multi-agent pipelines.
+
+Full documentation of everything built so far, design decisions and status:
+[`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md).
+
 ## Layout
 
 ```
 harness/      the harness
   agent.py    the loop: query model → parse one ```bash block → run → observe
   models.py   Anthropic + OpenAI-compatible providers (urllib), ScriptedModel for tests
-  sandbox.py  DockerSandbox (docker run + docker exec), LocalSandbox (tests only)
+  sandbox.py  DockerSandbox (docker run + docker exec, with limits), LocalSandbox (tests only)
+  selftest.py checks against a real container that every limit is enforced
   tasks.py    task loader
   run.py      CLI: run one task, run its check, save the trajectory
 sandbox/      Dockerfile for the image commands run in
@@ -38,7 +45,36 @@ trajectory: runs/20261115T160102Z_001-fizzbuzz/trajectory.json
 Other providers: `--provider openai --model gpt-4.1-mini`; any OpenAI-compatible
 server (OpenRouter, Ollama, vLLM) works by setting `OPENAI_BASE_URL`.
 
-Run the tests: `python3 -m pytest -q`
+Run the tests: `python3 -m pytest -q` (no Docker needed)
+
+Check the sandbox's isolation against real Docker (no API key needed):
+
+```bash
+python3 -m harness.selftest
+```
+
+## Sandbox isolation (Milestone 2)
+
+Each episode gets one container started with:
+
+| Setting | Flag | Default |
+|---|---|---|
+| No network | `--network none` | on (`--network bridge` to allow) |
+| CPU quota | `--cpus` | 1.0 |
+| Memory, no swap | `--memory` = `--memory-swap` | 512m |
+| Process limit | `--pids-limit` | 256 |
+| Non-root user | `--user agent` (uid 1000) | on |
+| No Linux capabilities | `--cap-drop ALL`, `no-new-privileges` | on |
+| Read-only root filesystem | `--read-only` + tmpfs `/tmp`, `$HOME`; volume `/workspace` | on |
+| Per-command timeout | `timeout -k 5 N` inside the container | 60 s (`--timeout`) |
+
+Override per run: `python3 -m harness.run tasks/001-fizzbuzz --memory 1g --cpus 2 --network bridge`.
+The limits used are saved in each trajectory under `"limits"`.
+
+When a command is killed, the agent is told why: a timeout comes back as exit code
+124 with `[harness] command timed out after Ns`; an out-of-memory kill comes back as
+137 with `[harness] process killed: out of memory`, detected from the container's
+cgroup `memory.events` counter.
 
 ## How the loop works (Milestone 1)
 
@@ -68,7 +104,7 @@ Run the tests: `python3 -m pytest -q`
 ## Milestones
 
 - [x] 1. Minimal loop + API, regex action parsing, trajectory JSON
-- [ ] 2. Docker hardening (`--network none`, CPU/mem limits, timeouts)
+- [x] 2. Docker hardening (`--network none`, CPU/mem limits, timeouts)
 - [ ] 3. Native tool calling with typed read/write/edit/bash
 - [ ] 4. Sessions (JSONL/SQLite), resume, AGENTS.md
 - [ ] 5. Context: output truncation, token counting, compaction

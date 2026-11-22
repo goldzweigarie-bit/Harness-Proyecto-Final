@@ -95,7 +95,12 @@ def run_agent(model, sandbox, task: str, max_steps: int = 30, cmd_timeout: int =
             break
 
         t1 = time.monotonic()
-        rc, out = sandbox.execute(command, timeout=cmd_timeout)
+        try:
+            rc, out = sandbox.execute(command, timeout=cmd_timeout)
+        except Exception as e:  # sandbox died (e.g. Docker stopped): end the run, keep the trajectory
+            res.exit_status, res.error = "error", f"sandbox: {type(e).__name__}: {e}"
+            res.events.append({**event, "command": command})
+            break
         event.update(command=command, returncode=rc, exec_s=round(time.monotonic() - t1, 3))
         res.events.append(event)
         messages.append({"role": "user", "content": format_observation(rc, out)})

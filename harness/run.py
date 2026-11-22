@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .agent import run_agent
 from .models import get_model
-from .sandbox import DockerSandbox, LocalSandbox
+from .sandbox import DockerSandbox, LocalSandbox, SandboxLimits
 from .tasks import load_task
 
 
@@ -25,11 +25,15 @@ def run_task(task, model, sandbox, runs_dir: Path = Path("runs"), cmd_timeout: i
     if task.files_dir:
         sandbox.copy_in(str(task.files_dir))
     res = run_agent(model, sandbox, task.instruction, max_steps=task.max_steps, cmd_timeout=cmd_timeout)
-    check_rc, check_out = sandbox.execute(task.check, timeout=cmd_timeout)
+    try:
+        check_rc, check_out = sandbox.execute(task.check, timeout=cmd_timeout)
+    except Exception as e:
+        check_rc, check_out = -1, f"[harness] check could not run: {type(e).__name__}: {e}"
     traj = {
         "task_id": task.id,
         "model": getattr(model, "name", "?"),
         "sandbox": type(sandbox).__name__,
+        "limits": asdict(sandbox.limits) if hasattr(sandbox, "limits") else None,
         "started_at": started.isoformat(),
         "wall_s": round(time.monotonic() - t0, 3),
         "exit_status": res.exit_status,
@@ -55,11 +59,16 @@ def main(argv=None):
     ap.add_argument("--image", default="nerv-sandbox:latest")
     ap.add_argument("--local", action="store_true", help="run on the host instead of Docker (unsafe, debugging only)")
     ap.add_argument("--timeout", type=int, default=60, help="per-command timeout in seconds")
+    ap.add_argument("--cpus", type=float, default=1.0)
+    ap.add_argument("--memory", default="512m")
+    ap.add_argument("--pids", type=int, default=256)
+    ap.add_argument("--network", default="none", help='"none" (default) or "bridge" to allow network')
     args = ap.parse_args(argv)
 
     task = load_task(args.task)
     model = get_model(args.provider, args.model)
-    sandbox = LocalSandbox() if args.local else DockerSandbox(image=args.image)
+    limits = SandboxLimits(network=args.network, cpus=args.cpus, memory=args.memory, pids=args.pids)
+    sandbox = LocalSandbox() if args.local else DockerSandbox(image=args.image, limits=limits)
     with sandbox:
         traj = run_task(task, model, sandbox, cmd_timeout=args.timeout)
     u = traj["usage"]
