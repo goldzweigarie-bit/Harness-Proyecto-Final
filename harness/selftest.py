@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import sys
 import tempfile
 import time
@@ -34,7 +35,9 @@ def check(name, ok, detail=""):
 
 
 def main(argv=None) -> int:
-    image = (argv or sys.argv[1:] or ["nerv-sandbox:latest"])[0]
+    ap = argparse.ArgumentParser(description="Check that the Docker sandbox enforces its limits")
+    ap.add_argument("--image", default="nerv-sandbox:latest")
+    image = ap.parse_args(argv).image
     limits = SandboxLimits()
     print(f"sandbox self-test on {image} with {limits}")
     results = []
