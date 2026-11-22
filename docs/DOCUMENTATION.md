@@ -60,8 +60,8 @@ repository, the tasks or the trajectories.
 
 | Milestone | Code | Tests (no Docker) | Verified on real Docker | Committed |
 |---|---|---|---|---|
-| 1. Minimal loop, regex parsing, trajectory JSON | done | 10 pass | **pending** — first real run with an API key not done yet | yes (`4d55225`) |
-| 2. Sandbox isolation (network, CPU, memory, pids, read-only, timeouts) | done | 10 pass | **pending** — `harness.selftest` not run yet | no |
+| 1. Minimal loop, regex parsing, trajectory JSON | done | 10 pass | **pending** — first real run blocked by the host's Python SSL certificates (see §6) | yes (`4d55225`) |
+| 2. Sandbox isolation (network, CPU, memory, pids, read-only, timeouts) | done | 10 pass | **yes** — self-test 12/12 on Docker Desktop (2026-11-21) | yes (`9af52bd`, `a6d8793`) |
 | 3–8 | not started | — | — | — |
 
 A milestone counts as **done** only when its code is committed *and* it has been
@@ -241,14 +241,51 @@ command timeout; SIGTERM-ignoring process still stopped; process limit; CPU quot
 | Evidence | Proves | Status |
 |---|---|---|
 | `pytest` — 20 tests (10 loop, 10 sandbox) | Loop logic; that the harness requests the right Docker flags and interprets exit codes correctly (uses a fake `docker` command) | passing |
-| `python3 -m harness.selftest` | That Docker actually enforces each limit | **pending** |
+| `python3 -m harness.selftest` | That Docker actually enforces each limit | **12/12 passed** (2026-11-21) |
 | `python3 -m harness.run tasks/001-fizzbuzz` with a real model | The full loop end to end; a saved trajectory | **pending** |
 
 The unit tests deliberately do not prove isolation — only the self-test on a
 real container does.
 
-Results of the pending checks will be recorded here, with date, Docker version
-and the self-test output.
+### 6.1 Self-test on real Docker — 2026-11-21
+
+Host: MacBook Air (Apple silicon), Docker Desktop (`desktop-linux` context), image
+`nerv-sandbox:latest` built from `python:3.12-slim`.
+
+```
+sandbox self-test on nerv-sandbox:latest with SandboxLimits(network='none', cpus=1.0, memory='512m', pids=256, user='agent', read_only_root=True, tmp_size='64m', extra_args=[])
+  PASS  runs as non-root  (uid 1000)
+  PASS  no network  (OSError: [Errno 101] Network is unreachable)
+  PASS  /workspace writable, copied files owned by agent  (agent)
+  PASS  agent's own exit code 124 is not mislabelled
+  PASS  root filesystem read-only  (touch: cannot touch '/var/tmp/probe': Read-only file system)
+  PASS  $HOME writable
+  PASS  /tmp writable
+  PASS  memory limit enforced  (rc 137: [harness] process killed: out of memory (limit 512m))
+  PASS  command timeout  (rc 124 after 2.2s)
+  PASS  timeout kills a process that ignores SIGTERM  (rc 124)
+  PASS  process limit enforced  (blocked after 251 processes: [Errno 11] Resource temporarily unavailable)
+  PASS  CPU quota set  (8 100000 100000)
+12/12 checks passed
+```
+
+Notes:
+- The out-of-memory kill was identified from the cgroup `memory.events` counter,
+  so the two host-dependent details flagged in Section 8 both work on this host.
+- The process limit stopped new processes at 251 of 256; the remaining slots were
+  taken by the shell, Python and the container's own `sleep`.
+- `nproc` reports 8 (the host's cores) while the cgroup quota is
+  `100000 100000` = 1 CPU: the limit is a time quota, not a change in visible cores.
+
+### 6.2 First real run — attempt 2026-11-21
+
+The run ended after 0.3 s with `exit_status: error`:
+`URLError: [SSL: CERTIFICATE_VERIFY_FAILED] … unable to get local issuer certificate`.
+The host's Python could not verify the API's TLS certificate, so the request
+never reached the provider. This is a host configuration issue (python.org builds
+on macOS ship without the system certificates), not a harness bug. The harness
+behaved as designed: it stopped, recorded the reason and the limits in the
+trajectory, and the check failed (`fizzbuzz.py` not found). To be re-run.
 
 ---
 
@@ -271,10 +308,11 @@ and the self-test output.
 
 ## 8. Known limitations
 
-- Isolation and the full loop are not yet verified on real Docker (Section 6).
-  Two details depend on the Docker host: the `uid=` option on the `/home/agent`
-  tmpfs, and whether `memory.events` is readable inside the container (if not,
-  out-of-memory kills still return 137, without the explanation).
+- The full loop has not yet completed a real run (Section 6.2). Isolation is
+  verified on Docker Desktop; on other hosts, two details depend on the host:
+  the `uid=` option on the `/home/agent` tmpfs, and whether `memory.events` is
+  readable inside the container (if not, out-of-memory kills still return 137,
+  without the explanation).
 - A command that itself contains ```` ``` ```` breaks text parsing (fixed by
   native tool calling in M3).
 - Network-level API errors (DNS, dropped connection) are not retried (M6).
@@ -322,6 +360,7 @@ python3 -m harness.run tasks/001-fizzbuzz
 | 2026-11-15 | Milestone 1: loop, providers, Docker sandbox, task format, trajectories, 9 tests. Committed. |
 | 2026-11-15 | Milestone 2 written: limits, kill reasons, self-test. Review fixes: copy-in via tar as agent user (the `chown` approach fails without capabilities); kill labels only when attributable; read-only probe moved to `/var/tmp`; OOM counter read only after a kill; sandbox crash still saves the trajectory. 20 tests. Not yet committed. |
 | 2026-11-21 | Specialization chosen: enterprise data and operations. This documentation file added. |
+| 2026-11-21 | Milestone 2 committed. Self-test 12/12 on Docker Desktop. Self-test now parses arguments with argparse (stray arguments were taken as the image name). First real run blocked by host SSL certificates. |
 
 ---
 
