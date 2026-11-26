@@ -91,3 +91,12 @@ def test_sandbox_crash_still_saves_trajectory(tmp_path):
         traj = run_task(task, ScriptedModel(["```bash\nls\n```"]), sb, runs_dir=tmp_path)
     assert traj["exit_status"] == "error" and "daemon went away" in traj["error"]
     assert not traj["check"]["passed"] and Path(traj["path"]).exists()
+
+
+def test_ollama_provider_points_at_localhost(monkeypatch):
+    from harness.models import get_model
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    m = get_model("ollama", None)
+    assert m.base_url == "http://localhost:11434/v1" and m.name == "qwen2.5-coder:7b"
+    assert m.api_key == "ollama" and m.request_timeout == 600

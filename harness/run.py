@@ -54,7 +54,7 @@ def run_task(task, model, sandbox, runs_dir: Path = Path("runs"), cmd_timeout: i
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Run one task with the NERV harness")
     ap.add_argument("task", help="path to a task directory, e.g. tasks/001-fizzbuzz")
-    ap.add_argument("--provider", default="anthropic", choices=["anthropic", "openai"])
+    ap.add_argument("--provider", default="anthropic", choices=["anthropic", "openai", "ollama"])
     ap.add_argument("--model", default=None)
     ap.add_argument("--image", default="nerv-sandbox:latest")
     ap.add_argument("--local", action="store_true", help="run on the host instead of Docker (unsafe, debugging only)")

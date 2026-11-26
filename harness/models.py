@@ -15,6 +15,7 @@ RETRY_STATUS = {429, 500, 502, 503, 529}
 
 
 def _post_json(url: str, headers: dict, body: dict, retries: int = 4, timeout: int = 120) -> dict:
+    """POST JSON, retrying on rate limits and server errors. `timeout` is per request, in seconds."""
     data = json.dumps(body).encode()
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=data, headers={"content-type": "application/json", **headers})
@@ -49,9 +50,11 @@ class AnthropicModel:
 class OpenAICompatModel:
     """Any /chat/completions endpoint: OpenAI, OpenRouter, Ollama, vLLM..."""
 
-    def __init__(self, model: str, base_url: str | None = None, api_key: str | None = None, max_tokens: int = 4096):
+    def __init__(self, model: str, base_url: str | None = None, api_key: str | None = None, max_tokens: int = 4096,
+                 request_timeout: int = 120):
         self.name = model
         self.max_tokens = max_tokens
+        self.request_timeout = request_timeout
         self.base_url = (base_url or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "none")
 
@@ -61,6 +64,7 @@ class OpenAICompatModel:
             {"authorization": f"Bearer {self.api_key}"},
             {"model": self.name, "max_tokens": self.max_tokens,
              "messages": [{"role": "system", "content": system}, *messages]},
+            timeout=self.request_timeout,
         )
         u = resp.get("usage", {})
         return resp["choices"][0]["message"]["content"] or "", {
@@ -85,4 +89,12 @@ def get_model(provider: str, model: str | None):
         return AnthropicModel(model or "claude-sonnet-5-5")
     if provider == "openai":
         return OpenAICompatModel(model or "gpt-4.1-mini")
-    raise ValueError(f"unknown provider {provider!r} (use anthropic or openai)")
+    if provider == "ollama":
+        # Local model through Ollama's OpenAI-compatible endpoint: free, offline, no key.
+        # Local inference on a laptop is slow, so each request may take up to 10 minutes.
+        return OpenAICompatModel(
+            model or os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:7b"),
+            base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            api_key="ollama", request_timeout=600,
+        )
+    raise ValueError(f"unknown provider {provider!r} (use anthropic, openai or ollama)")

@@ -60,7 +60,7 @@ repository, the tasks or the trajectories.
 
 | Milestone | Code | Tests (no Docker) | Verified on real Docker | Committed |
 |---|---|---|---|---|
-| 1. Minimal loop, regex parsing, trajectory JSON | done | 10 pass | **pending** — first real run blocked by the host's Python SSL certificates (see §6) | yes (`4d55225`) |
+| 1. Minimal loop, regex parsing, trajectory JSON | done | 11 pass | **yes** — `001-fizzbuzz` solved with `claude-sonnet-5-5` in Docker (2026-11-26, §6.3) | yes (`4d55225`) |
 | 2. Sandbox isolation (network, CPU, memory, pids, read-only, timeouts) | done | 10 pass | **yes** — self-test 12/12 on Docker Desktop (2026-11-21) | yes (`9af52bd`, `a6d8793`) |
 | 3–8 | not started | — | — | — |
 
@@ -140,6 +140,16 @@ Interface: `query(system, messages) -> (text, {"input_tokens", "output_tokens"})
 - Retries on HTTP 429, 500, 502, 503, 529: honours `retry-after`, otherwise
   exponential back-off (1, 2, 4, 8 s, max 30 s), up to 4 retries.
 - `ScriptedModel` replays canned replies (tests, sandbox checks without tokens).
+- `--provider ollama` — a local model through Ollama's OpenAI-compatible endpoint
+  (`http://localhost:11434/v1`, default model `qwen2.5-coder:7b`). Free and
+  offline; per-request timeout raised to 600 s because local inference on a
+  laptop is slow.
+
+**Why not `claude -p` (Claude Code in the terminal) to avoid API costs:** since
+15 Jun 2026, `claude -p` usage no longer counts toward a Claude plan's
+usage limits; it draws from a separate monthly credit, like the API. It would not
+save credits, and it would put Claude Code's own agent loop inside this harness,
+which defeats building the loop from scratch. Ollama is the zero-cost path.
 
 ### 4.3 Tasks (`harness/tasks.py`, `tasks/`)
 
@@ -242,7 +252,7 @@ command timeout; SIGTERM-ignoring process still stopped; process limit; CPU quot
 |---|---|---|
 | `pytest` — 20 tests (10 loop, 10 sandbox) | Loop logic; that the harness requests the right Docker flags and interprets exit codes correctly (uses a fake `docker` command) | passing |
 | `python3 -m harness.selftest` | That Docker actually enforces each limit | **12/12 passed** (2026-11-21) |
-| `python3 -m harness.run tasks/001-fizzbuzz` with a real model | The full loop end to end; a saved trajectory | **pending** |
+| `python3 -m harness.run tasks/001-fizzbuzz` with a real model | The full loop end to end; a saved trajectory | **passed** (2026-11-26) |
 
 The unit tests deliberately do not prove isolation — only the self-test on a
 real container does.
@@ -285,7 +295,35 @@ The host's Python could not verify the API's TLS certificate, so the request
 never reached the provider. This is a host configuration issue (python.org builds
 on macOS ship without the system certificates), not a harness bug. The harness
 behaved as designed: it stopped, recorded the reason and the limits in the
-trajectory, and the check failed (`fizzbuzz.py` not found). To be re-run.
+trajectory, and the check failed (`fizzbuzz.py` not found). A second attempt
+returned HTTP 401 (`invalid x-api-key`): the key was still a placeholder.
+
+### 6.3 First successful run — 2026-11-26
+
+```
+001-fizzbuzz: submitted in 4 steps, 13.828s, 3090 in / 904 out tokens, check PASSED
+trajectory: runs/20261126T183714Z_001-fizzbuzz/trajectory.json
+```
+
+Model `claude-sonnet-5-5` (Anthropic API), `DockerSandbox` with the default
+limits (no network, 1 CPU, 512 MB, 256 processes, non-root, read-only root).
+
+| Step | Model (s) | Command | Exec (s) | Exit |
+|---|---|---|---|---|
+| 1 | 2.9 | — format error: the reply's bash block had no closing fence | — | — |
+| 2 | 3.0 | `cat > /workspace/fizzbuzz.py <<'EOF' …` (writes the script, with argument validation) | 0.15 | 0 |
+| 3 | 2.1 | runs the script with N=0, N=1 and an invalid argument | 0.15 | 0 |
+| 4 | 5.4 | `submit` | — | — |
+
+Observations:
+- **Format-error recovery worked on a real model.** The first reply ended
+  without the closing ```` ``` ````, so no block was found; the harness sent the
+  format error back and the model complied on the next step.
+- **The loop is dominated by model time:** about 13.4 s waiting for the model
+  versus 0.3 s executing commands. This is the sequential baseline that Milestone 6
+  (concurrency) will be measured against.
+- The model tested edge cases (N=0, invalid input) beyond what the task asked;
+  the hidden check (N=15 and N=1) passed with exit code 0.
 
 ---
 
@@ -308,8 +346,7 @@ trajectory, and the check failed (`fizzbuzz.py` not found). To be re-run.
 
 ## 8. Known limitations
 
-- The full loop has not yet completed a real run (Section 6.2). Isolation is
-  verified on Docker Desktop; on other hosts, two details depend on the host:
+- Isolation is verified on Docker Desktop; on other hosts, two details depend on the host:
   the `uid=` option on the `/home/agent` tmpfs, and whether `memory.events` is
   readable inside the container (if not, out-of-memory kills still return 137,
   without the explanation).
@@ -361,6 +398,8 @@ python3 -m harness.run tasks/001-fizzbuzz
 | 2026-11-15 | Milestone 2 written: limits, kill reasons, self-test. Review fixes: copy-in via tar as agent user (the `chown` approach fails without capabilities); kill labels only when attributable; read-only probe moved to `/var/tmp`; OOM counter read only after a kill; sandbox crash still saves the trajectory. 20 tests. Not yet committed. |
 | 2026-11-21 | Specialization chosen: enterprise data and operations. This documentation file added. |
 | 2026-11-21 | Milestone 2 committed. Self-test 12/12 on Docker Desktop. Self-test now parses arguments with argparse (stray arguments were taken as the image name). First real run blocked by host SSL certificates. |
+| 2026-11-26 | `--provider ollama` added (free local model). Decision recorded not to use `claude -p` as a backend. 21 tests. |
+| 2026-11-26 | **Milestone 1 verified:** first successful real run (`001-fizzbuzz`, `claude-sonnet-5-5`, Docker, 4 steps, check passed). Milestones 1 and 2 complete. |
 
 ---
 

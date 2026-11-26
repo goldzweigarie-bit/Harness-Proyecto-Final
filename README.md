@@ -43,7 +43,11 @@ trajectory: runs/20261115T160102Z_001-fizzbuzz/trajectory.json
 ```
 
 Other providers: `--provider openai --model gpt-4.1-mini`; any OpenAI-compatible
-server (OpenRouter, Ollama, vLLM) works by setting `OPENAI_BASE_URL`.
+server (OpenRouter, Gemini, vLLM) works by setting `OPENAI_BASE_URL`.
+
+Free and offline: `--provider ollama` uses a local model through
+[Ollama](https://ollama.com) (`ollama pull qwen2.5-coder:7b` first). No key, no
+credits. Override the model with `--model` or `OLLAMA_MODEL`.
 
 Run the tests: `python3 -m pytest -q` (no Docker needed)
 
